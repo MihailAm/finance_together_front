@@ -1,7 +1,7 @@
 {
   "expo": {
     "scheme": "myapp",
-    "name": "finance_together_front",
+    "name": "Семейный бюджет",
     "slug": "finance_together_front",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -20,10 +20,12 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "package": "com.finance_together_front.myapp"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": ["@react-native-google-signin/google-signin"]
   }
 }

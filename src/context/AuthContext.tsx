@@ -1,66 +1,115 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { loginUser, registerUser } from '../services/AuthService';
-import { saveTokens, removeTokens, getAccessToken } from '../services/TokenService';
-import { Linking } from 'react-native';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { AppState } from "react-native";
+import { jwtDecode } from "jwt-decode";
 
-interface AuthContextType {
-  isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (name: string, surname: string, email: string, password: string) => Promise<void>;
-  loginWithYandex: (accessToken: string, refreshToken: string) => Promise<void>;
+type AuthContextType = {
+  isAuthenticated: boolean | null;
+  login: (token: string) => Promise<void>;
   logout: () => Promise<void>;
-}
+};
+
+type AuthProviderProps = {
+  children: ReactNode;
+};
+
+type DecodedToken = {
+  exp: number;
+};
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  let backgroundTimeout: NodeJS.Timeout | null = null; // Храним таймер
+
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: string) => {
+      if (nextAppState === "background") {
+        console.log("App moved to background, starting 5-minute timer...");
+        backgroundTimeout = setTimeout(async () => {
+          console.log("5 minutes passed, clearing token...");
+          await AsyncStorage.removeItem("access_token");
+          setIsAuthenticated(false);
+        }, 5 * 60 * 1000); // 5 минут (в миллисекундах)
+      } else if (nextAppState === "active") {
+        if (backgroundTimeout) {
+          console.log("App returned to foreground, clearing timeout...");
+          clearTimeout(backgroundTimeout); // Отменяем удаление токена, если приложение вернулось
+          backgroundTimeout = null;
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener(
+      "change",
+      handleAppStateChange
+    );
+
+    return () => {
+      subscription.remove();
+      if (backgroundTimeout) {
+        clearTimeout(backgroundTimeout);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const checkAuth = async () => {
-      const token = await getAccessToken();
+      const token = await AsyncStorage.getItem("access_token");
+
       if (token) {
-        setIsAuthenticated(true);
+        try {
+          const decoded: DecodedToken = jwtDecode(token);
+          const isTokenExpired = decoded.exp * 1000 < Date.now();
+
+          if (!isTokenExpired) {
+            setIsAuthenticated(true);
+          } else {
+            console.log("Token expired, clearing storage...");
+            await AsyncStorage.removeItem("access_token");
+            setIsAuthenticated(false);
+          }
+        } catch (error) {
+          console.error("Invalid token format, clearing storage...");
+          await AsyncStorage.removeItem("access_token");
+          setIsAuthenticated(false);
+        }
+      } else {
+        setIsAuthenticated(false);
       }
     };
+
     checkAuth();
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const { access_token, refresh_token } = await loginUser(email, password);
-    await saveTokens(access_token, refresh_token);
-    setIsAuthenticated(true);
-  };
-
-  const register = async (name: string, surname: string, email: string, password: string) => {
-    const { access_token, refresh_token } = await registerUser(name, surname, email, password);
-    await saveTokens(access_token, refresh_token);
-    setIsAuthenticated(true);
-  };
-
-  const loginWithYandex = async (accessToken: string, refreshToken: string) => {
-    await saveTokens(accessToken, refreshToken);
+  const login = async (token: string) => {
+    await AsyncStorage.setItem("access_token", token);
     setIsAuthenticated(true);
   };
 
   const logout = async () => {
-    await removeTokens();
+    await AsyncStorage.removeItem("access_token");
     setIsAuthenticated(false);
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, login, register, loginWithYandex, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
 };
 
-export const useAuth = (): AuthContextType => {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 };
-
-

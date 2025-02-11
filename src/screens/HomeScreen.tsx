@@ -1,41 +1,40 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, Button, FlatList, StyleSheet } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Для работы с AsyncStorage
-import { AccountCreateSchemaUser } from '../types/AccountSchema';
-import { AccountSchema } from '../types/AccountSchema';
-import CreateAccount from '../components/CreateAccount'; 
+import React, { useState, useCallback } from "react";
+import {
+  View,
+  Text,
+  FlatList,
+  StyleSheet,
+  TouchableOpacity,
+} from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { AccountSchema } from "../types/AccountSchema";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { RootStackParamList } from "../utils/navigation";
+import ColorPickerModal from "../components/ColorPickerModal";
+import { API_URL } from "../services/config";
+import { getToken } from "../services/GetToken";
 
-// URL вашего API
-const API_URL = 'http://localhost:8000/accounts/user';
+const URL = `${API_URL}/accounts/user`;
 
 const HomeScreen: React.FC = () => {
   const [accounts, setAccounts] = useState<AccountSchema[]>([]);
-  const [isCreating, setIsCreating] = useState(false);
-
-  // Получаем токен из AsyncStorage
-  const getToken = async () => {
-    try {
-      const token = await AsyncStorage.getItem('access_token'); // Берем токен из AsyncStorage
-      return token;
-    } catch (error) {
-      console.error('Error getting token:', error);
-      return null;
-    }
-  };
-
-  // Получаем все аккаунты при монтировании компонента
-  useEffect(() => {
-    fetchAccounts();
-  }, []);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(
+    null
+  );
+  const [modalVisible, setModalVisible] = useState(false);
+  const [accountColors, setAccountColors] = useState<{
+    [key: number]: string;
+  }>({});
+  const navigation = useNavigation<RootStackParamList>();
 
   const fetchAccounts = async () => {
-    const token = await getToken(); // Получаем токен
+    const token = await getToken();
     if (token) {
       try {
-        const response = await fetch(API_URL, {
-          method: 'GET',
+        const response = await fetch(URL, {
+          method: "GET",
           headers: {
-            'Authorization': `Bearer ${token}`, // Передаем токен в заголовке
+            Authorization: `Bearer ${token}`,
           },
         });
 
@@ -43,72 +42,130 @@ const HomeScreen: React.FC = () => {
           const data: AccountSchema[] = await response.json();
           setAccounts(data);
         } else {
-          console.error('Failed to fetch accounts');
+          console.log("Failed to fetch accounts");
         }
       } catch (error) {
-        console.error('Error fetching accounts:', error);
+        console.log("Error fetching accounts:", error);
       }
     } else {
-      console.log('No token found');
+      console.log("No token found");
     }
   };
 
-  const handleAddAccount = async (newAccount: AccountCreateSchemaUser) => {
-    const token = await getToken(); // Получаем токен
-    if (token) {
-      try {
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`, // Передаем токен в заголовке
-          },
-          body: JSON.stringify(newAccount), // Отправляем данные о новом аккаунте
-        });
-
-        if (response.ok) {
-          fetchAccounts(); // Обновляем список аккаунтов после создания
-          setIsCreating(false); // Закрываем форму добавления
-        } else {
-          console.error('Failed to create account');
-        }
-      } catch (error) {
-        console.error('Error creating account:', error);
+  const loadColors = async () => {
+    try {
+      const colors = await AsyncStorage.getItem("accountColors");
+      if (colors) {
+        setAccountColors(JSON.parse(colors));
       }
-    } else {
-      console.log('No token found');
+    } catch (error) {
+      console.log("Error loading colors:", error);
     }
   };
 
-  const handleCreateAccount = () => {
-    setIsCreating(true); // Открываем форму для добавления аккаунта
+  const saveColors = async (colors: { [key: number]: string }) => {
+    try {
+      await AsyncStorage.setItem("accountColors", JSON.stringify(colors));
+    } catch (error) {
+      console.log("Error saving colors:", error);
+    }
   };
 
-  const renderAccount = ({ item }: { item: AccountSchema }) => (
-    <View style={styles.card}>
-      <Text style={styles.cardTitle}>{item.account_name}</Text>
-      <Text style={styles.cardBalance}>Balance:{item.balance} рублей</Text>
-    </View>
+  const handleColorSelect = (color: string) => {
+    if (selectedAccountId !== null) {
+      const updatedColors = { ...accountColors, [selectedAccountId]: color };
+      setAccountColors(updatedColors);
+      saveColors(updatedColors);
+      setModalVisible(false);
+    }
+  };
+
+  const isDarkColor = (color: string): boolean => {
+    // Переводим цвет из HEX в RGB
+    const hex = color.replace("#", "");
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+
+    // Рассчитываем яркость цвета
+    const brightness = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+    // Если яркость ниже 128, считаем цвет темным
+    return brightness < 128;
+  };
+
+  const renderAccount = ({ item }: { item: AccountSchema }) => {
+    const backgroundColor = accountColors[item.id] || "#fff";
+    const textColor = isDarkColor(backgroundColor) ? "#fff" : "#000";
+
+    return (
+      <TouchableOpacity
+        style={[styles.card, { backgroundColor }]}
+        onPress={() =>
+          navigation.navigate("AccountDetails", {
+            accountId: item.id,
+            accountName: item.account_name,
+            accountBalance: item.balance,
+          })
+        }
+        onLongPress={() => {
+          setSelectedAccountId(item.id);
+          setModalVisible(true);
+        }}
+      >
+        <Text style={[styles.cardTitle, { color: textColor }]}>
+          {item.account_name}
+        </Text>
+        <Text style={[styles.cardBalance, { color: textColor }]}>
+          Баланс: {item.balance} ₽
+        </Text>
+        <View>
+          <Text style={[styles.palette, { color: textColor }]}>
+            Удерживайте, чтобы изменить цвет
+          </Text>
+        </View>
+        {selectedAccountId !== null && (
+          <ColorPickerModal
+            selectedAccountId={selectedAccountId}
+            accountColors={accountColors}
+            setAccountColors={setAccountColors}
+            saveColors={saveColors}
+            setSelectedAccountId={setSelectedAccountId}
+            visible={modalVisible}
+            onRequestClose={() => setModalVisible(false)}
+            onSelectColor={(color: string) => handleColorSelect(color)}
+          />
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchAccounts();
+      loadColors();
+    }, [])
   );
 
   return (
     <View style={styles.container}>
       {accounts.length === 0 ? (
-        isCreating ? (
-          <CreateAccount onAddAccount={handleAddAccount} />
-        ) : (
-          <View style={styles.addAccountContainer}>
-            <Text>No accounts found.</Text>
-            <Button title="Add Account" onPress={handleCreateAccount} />
+        <View style={styles.notAccount}>
+          <View>
+            <Text>У вас нет пока счетов</Text>
           </View>
-        )
+          <TouchableOpacity
+            onPress={() => navigation.navigate("AccountCreate")}
+          >
+            <Text style={styles.addaccount}>Добавить счет</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <FlatList
           data={accounts}
           renderItem={renderAccount}
           keyExtractor={(item) => item.id.toString()}
-          horizontal
-          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
         />
       )}
     </View>
@@ -120,30 +177,82 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
   },
-  addAccountContainer: {
+  notAccount: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  addaccount: {
+    fontSize: 18,
+    backgroundColor: "#FF6347",
+    padding: 8,
+    borderRadius: 8,
+    color: "#fff",
+    alignItems: "center",
+    fontWeight: "500",
   },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    width: 250,
-    marginHorizontal: 10,
-    padding: 15,
-    shadowColor: '#000',
+    padding: 16,
+    marginBottom: 12,
+    borderRadius: 8,
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.5,
-    elevation: 5,
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+    position: "relative",
+    marginHorizontal: 10,
+    width: 330,
+    height: 200,
   },
   cardTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   cardBalance: {
     fontSize: 16,
-    color: '#555',
+    color: "#555",
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  modalContent: {
+    backgroundColor: "#fff",
+    padding: 20,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 16,
+  },
+  colorPalette: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+  },
+  colorOption: {
+    width: 40,
+    height: 40,
+    margin: 8,
+    borderRadius: 20,
+  },
+  closeButton: {
+    marginTop: 20,
+  },
+  closeButtonText: {
+    fontSize: 16,
+    color: "#2196F3",
+  },
+  palette: {
+    position: "absolute",
+    top: 105,
+    color: "#ccc",
+    alignSelf: "center",
   },
 });
 

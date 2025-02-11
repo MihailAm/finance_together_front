@@ -1,24 +1,39 @@
-import axios from 'axios';
-import { saveTokens } from './TokenService';
-
-const API_URL = 'http://localhost:8000'; // Замените на ваш URL API
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import axios from "./TokenService";
+import { API_URL } from "./config";
 
 export const loginUser = async (email: string, password: string) => {
-  const response = await axios.post(`${API_URL}/auth/login/`, { email, password });
-  const { access_token, refresh_token } = response.data;
+  const response = await axios.post(`${API_URL}/auth/login/`, {
+    email,
+    password,
+  });
+  const { access_token } = response.data;
 
-  // Сохраняем токены через TokenService
-  await saveTokens(access_token, refresh_token);
+  if (response.data && access_token) {
+    await AsyncStorage.setItem("access_token", access_token);
+  }
 
-  return { access_token, refresh_token };
+  return { access_token };
 };
 
-export const registerUser = async (name: string, surname: string, email: string, password: string) => {
-  const response = await axios.post(`${API_URL}/users/`, { name, surname, email, password });
-  const { access_token, refresh_token } = response.data;
+export const registerUser = async (
+  name: string,
+  surname: string,
+  email: string,
+  password: string
+) => {
+  const response = await axios.post(`${API_URL}/users/`, {
+    name,
+    surname,
+    email,
+    password,
+  });
 
-  // Сохраняем токены через TokenService
-  await saveTokens(access_token, refresh_token);
+  const { access_token } = response.data;
 
-  return { access_token, refresh_token };
+  if (response.data && access_token) {
+    await AsyncStorage.setItem("access_token", access_token);
+  }
+
+  return { access_token };
 };
